@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.572
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoverControlSystem", "RoverControlSystem\RoverControlSystem.csproj", "{14C63722-C872-4421-83B0-29CF477C2712}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{14C63722-C872-4421-83B0-29CF477C2712}.Debug|x64.ActiveCfg = Debug|x64
+		{14C63722-C872-4421-83B0-29CF477C2712}.Debug|x64.Build.0 = Debug|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F68C92AB-88B0-4CFE-965D-B55947FD7B15}
+	EndGlobalSection
+EndGlobal
