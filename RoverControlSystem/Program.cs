@@ -249,10 +249,18 @@ namespace IngameScript
             DockingController dc = findModuleById("DC") as DockingController;
             if (dc != null)
             {
-                Color color = dc.IsConnected ? Color.Green : (dc.IsReadyToConnect ? Color.Yellow : UITextColor_);
-                MySprite text = MySprite.CreateText("Connected", UITextFont_, color, fontScale);
-                text.Position = new Vector2(offsetX, offsetY);
-                frame.Add(text);
+                // connect state
+                Color csSColor = dc.IsConnected ? Color.Green : (dc.IsReadyToConnect ? Color.Yellow : UITextColor_);
+                MySprite csText = MySprite.CreateText("Connected", UITextFont_, csSColor, fontScale);
+                csText.Position = new Vector2(offsetX, offsetY);
+                frame.Add(csText);
+                offsetY += lineHeight + UIPadding_;
+
+                // home base
+                Color hbColor = dc.IsHomeBase ? Color.Green : (dc.IsConnected || dc.IsReadyToConnect ? Color.Red : UITextColor_);
+                MySprite hbText = MySprite.CreateText("Home Base", UITextFont_, hbColor, fontScale);
+                hbText.Position = new Vector2(offsetX, offsetY);
+                frame.Add(hbText);
                 offsetY += lineHeight + UIPadding_;
             }
 
@@ -934,6 +942,7 @@ namespace IngameScript
 
             bool isConnected_ = false;
             bool isReadyToConnect_ = false;
+            bool isHomeBase_ = false;
 
 
             public DockingController(Program parent)
@@ -958,6 +967,15 @@ namespace IngameScript
                 get
                 {
                     return isReadyToConnect_ && !isConnected_;
+                }
+            }
+
+
+            public bool IsHomeBase
+            {
+                get
+                {
+                    return isHomeBase_;
                 }
             }
             #endregion
@@ -1011,6 +1029,7 @@ namespace IngameScript
 
                     bool readyToConnect = false;
                     bool connected = false;
+                    bool homeBase = false;
 
                     // automaticaly connect/disconnect
                     foreach (var connector in connectors_)
@@ -1029,6 +1048,10 @@ namespace IngameScript
 
                             connected = true;
                             readyToConnect = false;
+
+                            // ToDo: find a better way to determine this
+                            if (connector.OtherConnector.CustomData.Contains("RCS.Home=true"))
+                                homeBase = true;
                         }
                     }
 
@@ -1062,6 +1085,7 @@ namespace IngameScript
                     // store values
                     isReadyToConnect_ = readyToConnect;
                     isConnected_ = connected;
+                    isHomeBase_ = homeBase;
                 }
                 else if (State == ModuleState.Bootup)
                 {
@@ -1497,7 +1521,7 @@ namespace IngameScript
 
                 // we are connected, so we want to load all batteries. But we neet to keep at least
                 // one battery in discharge or auto mode.
-                if (dc_.IsConnected)
+                if (dc_.IsHomeBase)
                 {
                     if (batteryTickCount_-- > 0)
                         return false;
@@ -1764,7 +1788,6 @@ namespace IngameScript
                     if (!hasOneBatteryManaged())
                         hasOneGeneratorManaged();
 
-                    /*
                     Echo("EM:GeneratorsRunning=" + generatorRunning_);
                     Echo("EM:BatteryPowerLeft=" + batteryPowerLeft_.ToString("##0.000"));
                     Echo("EM:BatteryPowerInUsage=" + batteryPowerInUsage_.ToString("##0.000"));
@@ -1772,7 +1795,9 @@ namespace IngameScript
                     Echo("EM:BatteryCurrentOutput=" + batteryCurrentOutput_.ToString("##0.000"));
                     Echo("EM:BatteryMaxOutput=" + batteryMaxOutput_.ToString("##0.000"));
                     Echo("EM:BatteryMaxStored=" + batteryMaxStored_.ToString("##0.000"));
-                    */
+                    Echo("EM:BatteryAmountInRechargeMode=" + batteryAmountInRechargeMode_);
+                    Echo("EM:BatteryAmountOfActive=" + batteryAmountOfActive_);
+                    Echo("EM:HomeBase=" + (dc_.IsHomeBase ? "true" : "false"));
                 }
                 else if (State == ModuleState.Bootup)
                 {
