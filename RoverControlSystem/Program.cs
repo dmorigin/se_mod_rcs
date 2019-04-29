@@ -360,7 +360,6 @@ namespace IngameScript
         private Exception lastException_ = null;
         int nextModulePosition_ = 0;
         bool useFastMode_ = defaultUseFastMode_;
-        string lcdMessage = string.Empty;
 
 
         #region System State Handler
@@ -374,7 +373,8 @@ namespace IngameScript
             // scan all blocks
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, (block) =>
             {
-                if (!block.IsSameConstructAs(block))
+                //if (!block.IsSameConstructAs(block))
+                if (Me.CubeGrid != block.CubeGrid)
                     return false;
 
                 foreach (var module in modules_)
@@ -415,13 +415,11 @@ namespace IngameScript
             {
                 Module module = modules_[nextModulePosition_++];
                 module.onProcss(updateType);
-                lcdMessage += module.flushMessage();
 
                 if (nextModulePosition_ >= modules_.Count)
                 {
                     nextModulePosition_ = 0;
                     UpdateLCDPanels(false);
-                    lcdMessage = string.Empty;
                 }
                 else
                     UpdateLCDPanels(true);
@@ -429,10 +427,7 @@ namespace IngameScript
             else
             {
                 foreach (var module in modules_)
-                {
                     module.onProcss(updateType);
-                    lcdMessage += module.flushMessage();
-                }
 
                 UpdateLCDPanels(false);
             }
@@ -457,27 +452,26 @@ namespace IngameScript
                 Failure
             }
 
-            private Program parent_ = null;
+            private Program app_ = null;
             private string moduleName_ = "";
             private string moduleId_ = "";
-            private string message_ = "";
             private ModuleState moduleState_ = ModuleState.Invalidate;
 
 
-            public Module(Program parent, string name, string id)
+            public Module(Program app, string name, string id)
             {
-                parent_ = parent;
+                app_ = app;
                 moduleName_ = name;
                 moduleId_ = id;
             }
 
 
             #region Properties
-            public Program Parent
+            protected Program App
             {
                 get
                 {
-                    return parent_;
+                    return app_;
                 }
             }
 
@@ -500,11 +494,11 @@ namespace IngameScript
             }
 
 
-            public IMyProgrammableBlock Me
+            protected IMyProgrammableBlock Me
             {
                 get
                 {
-                    return Parent.Me;
+                    return app_.Me;
                 }
             }
 
@@ -577,23 +571,10 @@ namespace IngameScript
                 moduleState_ = state;
             }
 
-            protected void addMessageLine(string message)
-            {
-                message_ += message + "\n";
-            }
-
-
-            public string flushMessage()
-            {
-                string outMesssage = message_;
-                message_ = "";
-                return outMesssage;
-            }
-
 
             public void Echo(string message)
             {
-                Parent.Echo(message);
+                App.Echo(message);
             }
             #endregion
 
@@ -1085,7 +1066,7 @@ namespace IngameScript
                 else if (State == ModuleState.Bootup)
                 {
                     // wait for Main RCS System
-                    rcs_ = Parent.findModuleById("RCS") as MainRCSSystem;
+                    rcs_ = App.findModuleById("RCS") as MainRCSSystem;
                     if (rcs_ != null && rcs_.State == ModuleState.Running)
                         setState(ModuleState.Running);
                 }
@@ -1139,7 +1120,7 @@ namespace IngameScript
             }
 
 
-            private bool getRealHeightSquared(IMyMotorSuspension motor, out double height)
+            private bool getRealHeight(IMyMotorSuspension motor, out double height)
             {
                 height = 0;
 
@@ -1191,6 +1172,8 @@ namespace IngameScript
 
                 // clamp strength value
                 strengthDestination_ = strengthDestination_ < strengthMin_ ? strengthMin_ : (strengthDestination_ > 100f ? 100f : strengthDestination_);
+                if (float.IsNaN(strengthDestination_))
+                    strengthDestination_ = strengthMin_;
             }
 
 
@@ -1200,7 +1183,7 @@ namespace IngameScript
                 var shipLV = Vector3D.Normalize(rcs_.MainCockpit.GetShipVelocities().LinearVelocity);
                 var fw = Vector3D.Normalize(rcs_.MainCockpit.WorldMatrix.Forward);
 
-                // is this value is > 0 then we are driving forward, it this value is < 0 we driving backward.
+                // is this value is > 0 then we are driving forward, if this value is < 0 we driving backward.
                 double length = 1 - (shipLV - fw).Length();
                 length = double.IsNaN(length) ? 0 : length;
 
@@ -1216,7 +1199,7 @@ namespace IngameScript
                         powerDestination_ = (float)(1 - (rcs_.Speed / ((vehicleMaxSpeed_ * 0.0002777777778f) * 1000f))) * 100f;
                 }
 
-                powerDestination_ = Math.Max(powerMinDestination_, powerDestination_);
+                powerDestination_ = Math.Max(powerMinDestination_, float.IsNaN(powerDestination_) ? 0f : powerDestination_);
             }
 
 
@@ -1268,8 +1251,7 @@ namespace IngameScript
                 if (State == ModuleState.Running)
                 {
                     // we don't need this module keep running
-                    if (rcs_.State != ModuleState.Running || dc_.State != ModuleState.Running ||
-                        dc_.IsReadyToConnect || dc_.IsConnected)
+                    if (rcs_.State != ModuleState.Running || dc_.State != ModuleState.Running || dc_.IsConnected)
                         setState(ModuleState.Stopped);
 
                     double realHeight = 0;
@@ -1280,11 +1262,12 @@ namespace IngameScript
                         motor.SetValue<float>("Speed Limit", vehicleMaxSpeed_);
 
                         double heightValue = 0;
-                        if (getRealHeightSquared(motor, out heightValue))
+                        if (getRealHeight(motor, out heightValue))
                             realHeight += heightValue;
 
                         // apply strength value
-                        motor.Strength = strengthDestination_;
+                        if (rcs_.Speed < 0.1f)
+                            motor.Strength = strengthDestination_;
                         heightOffset += motor.Height;
 
 
@@ -1298,11 +1281,6 @@ namespace IngameScript
                             else
                                 motor.Power -= powerIncrease_;
                         }
-
-                        if (dc_.IsConnected)
-                            deactivateBlock(motor);
-                        else
-                            activateBlock(motor);
                     }
 
                     motorHeightReal_ = realHeight / motors_.Count;
@@ -1315,7 +1293,9 @@ namespace IngameScript
                     Echo("SC:vehicleLastMass_=" + vehicleLastMass_.ToString("########0.##"));
                     */
 
-                    calculateStrengthValue();
+                    if (rcs_.Speed < 0.1f)
+                        calculateStrengthValue();
+
                     calculatePowerValue();
 
                     // manage break lights
@@ -1341,12 +1321,12 @@ namespace IngameScript
                 else if (State == ModuleState.Bootup)
                 {
                     if (rcs_ == null)
-                        rcs_ = Parent.findModuleById("RCS") as MainRCSSystem;
+                        rcs_ = App.findModuleById("RCS") as MainRCSSystem;
                     else
                         return;
 
                     if (dc_ == null)
-                        dc_ = Parent.findModuleById("DC") as DockingController;
+                        dc_ = App.findModuleById("DC") as DockingController;
                     else
                         return;
 
@@ -1360,6 +1340,7 @@ namespace IngameScript
                             // setup start values
                             strength += motor.Strength;
                             power += motor.Power;
+                            activateBlock(motor);
                         }
 
                         strengthDestination_ = strength / motors_.Count;
@@ -1373,7 +1354,7 @@ namespace IngameScript
                 {
                     // we are ready to continue
                     if (rcs_.State == ModuleState.Running && dc_.State == ModuleState.Running &&
-                        !dc_.IsConnected && !dc_.IsReadyToConnect)
+                        !dc_.IsConnected)
                     {
                         waitBeforeRun_ = 2;
                         setState(ModuleState.Resume);
@@ -1483,6 +1464,8 @@ namespace IngameScript
             float batteryIsFull_ = 0.99f;
             float batteryNeedsRecharge_ = 0.05f;
 
+            int batteryTickCount_ = 0;
+
             /*!
              * Recalculate the amount of active an recharging batteries
              */
@@ -1516,41 +1499,24 @@ namespace IngameScript
                 // one battery in discharge or auto mode.
                 if (dc_.IsConnected)
                 {
-                    IMyBatteryBlock maxStoredBattery = null;
-                    IMyBatteryBlock minStoredBattery = null;
-                    float maxStoredValue = 0f;
-                    float minStoredValue = 1f;
+                    if (batteryTickCount_-- > 0)
+                        return false;
+                    batteryTickCount_ = 10;
+
+                    calculateBatteryStateCounts();
 
                     foreach (var battery in batteries_)
                     {
                         float curValue = battery.CurrentStoredPower / battery.MaxStoredPower;
 
-                        if (curValue < minStoredValue)
-                        {
-                            minStoredBattery = battery;
-                            minStoredValue = curValue;
-                        }
-                        else if (curValue > maxStoredValue)
-                        {
-                            maxStoredBattery = battery;
-                            maxStoredValue = curValue;
-                        }
-
                         if (battery.ChargeMode != ChargeMode.Recharge &&
                             batteryAmountInRechargeMode_ < (batteryAmountOfActive_ - 1))
                         {
-                            battery.ChargeMode = ChargeMode.Recharge;
-                            batteryAmountInRechargeMode_++;
+                            if (curValue <= (batteryIsFull_ - batteryNeedsRecharge_))
+                                battery.ChargeMode = ChargeMode.Recharge;
                         }
                         else
                             battery.ChargeMode = ChargeMode.Auto;
-                    }
-
-                    // switch max stored battery with min stored battery
-                    if (maxStoredBattery != null && minStoredBattery != null)
-                    {
-                        maxStoredBattery.ChargeMode = ChargeMode.Auto;
-                        minStoredBattery.ChargeMode = ChargeMode.Recharge;
                     }
 
                     return false;
@@ -1768,8 +1734,8 @@ namespace IngameScript
                 }
 
                 IMyPowerProducer generator = block as IMyPowerProducer;
-                if (generator != null && (generator.BlockDefinition.SubtypeId.EndsWith("HydrogenEngine") ||
-                    generator.BlockDefinition.SubtypeId.EndsWith("Generator")))
+                if (generator != null && (generator.BlockDefinition.SubtypeId.Contains("HydrogenEngine") ||
+                    generator.BlockDefinition.SubtypeId.Contains("Generator")))
                 {
                     generators_.Add(generator);
                     return true;
@@ -1811,7 +1777,7 @@ namespace IngameScript
                 else if (State == ModuleState.Bootup)
                 {
                     if (dc_ == null)
-                        dc_ = Parent.findModuleById("DC") as DockingController;
+                        dc_ = App.findModuleById("DC") as DockingController;
 
                     if (dc_ != null && dc_.State == ModuleState.Running)
                     {
@@ -1961,6 +1927,7 @@ namespace IngameScript
             {
                 if (State == ModuleState.Running)
                 {
+                    /*
                     Echo("IM:inventoryIceAmount_=" + inventoryIceAmount_);
                     Echo("IM:hydrogenFillRatio_=" + hydrogenFillRatio_);
                     Echo("IM:oxygenFillRatio_=" + oxygenFillRatio_);
@@ -1968,7 +1935,7 @@ namespace IngameScript
                     Echo("IM:tickCounter_=" + tickCounter_);
                     Echo("IM:HydrogenTanks=" + hydrogenTanks_.Count);
                     Echo("IM:OxygenTanks=" + oxygenTanks_.Count);
-
+                    */
                     tickCounter_++;
 
                     // check hydrogen
