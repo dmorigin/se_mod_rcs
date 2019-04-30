@@ -6,11 +6,11 @@ Page: https://www.gamers-shell.de/
 
 This is a script for a programable block in Space Engineers. It is designed to manage a couple of things in a rover or any other vehicle like a rover. Any operations are split up in modules. So it is possible to deactivate or activate single modules. For more details about the modules read the description further down.
 
-# Space Engineers
+## Space Engineers
 
 Space Engineers is a Game developed by Keen Software House. You can find more details about Keen Software House at his official Web Site at https://www.keenswh.com/. Or visit his forum directly at https://forums.keenswh.com/.
 
-# Modules
+## Modules
 
 The system is designed around modules. Every operation or group of operations are implemented as a module. The base of this script manageing these modules and execute them. Some of the modules has dependencies to other modules. In this case a modules is waiting for it's dependencies before running.
 
