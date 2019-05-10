@@ -7,15 +7,16 @@ using System.Collections;
 using System.Linq;
 using System.Text;
 using System;
-using VRage;
 using VRage.Collections;
-using VRage.Game.GUI.TextPanel;
 using VRage.Game.Components;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.ModAPI.Ingame.Utilities;
+using VRage.Game.GUI.TextPanel;
 using VRage.Game.ObjectBuilders.Definitions;
 using VRage.Game;
 using VRageMath;
+
+
 
 namespace IngameScript
 {
@@ -28,10 +29,11 @@ namespace IngameScript
         static readonly string defaultConnectorLightsGroupName_ = "Lights Connector"; // group name
 
         // Default values - States
-        static readonly bool defaultUseFastMode_ = true;
-        static readonly bool defaultUseAutoFastMode_ = true;
+        static readonly bool defaultUseFastMode_ = false;
+        //static readonly bool defaultUseAutoFastMode_ = true;
         static readonly string defaultUITextFont_ = "Monospace";
         static readonly float defaultUIPadding_ = 10f;
+        static readonly TimeSpan defaultLCDUpdateInterval_ = new TimeSpan(600000); // 60sec
 
         // Default values - Colors
         static readonly Color defaultSurfaceBackgroundColor_ = new Color(0, 38, 121);
@@ -46,315 +48,352 @@ namespace IngameScript
         static readonly Color defaultUITextColor_ = Color.Azure;
 
 
-        const string rcsVersion_ = "0.42 Alpha";
+        const string rcsVersion_ = "0.45 Alpha";
 
 
         #region Visualization
-        Color surfaceBackgroundColor_ = defaultSurfaceBackgroundColor_;
-        Color logoBackgroundColor_ = defaultLogoBackgroundColor_;
-        Color logoForgroundColor_ = defaultLogoForgroundColor_;
+        List<Surface> surfaces_ = new List<Surface>();
         Dictionary<Module.ModuleState, Color> moduleStateColor_;
-        Color UITextColor_ = defaultUITextColor_;
-        string UITextFont_ = defaultUITextFont_;
-        Vector2 UIFontSize_ = new Vector2();
-        float UIPadding_ = defaultUIPadding_;
 
 
-        private void UpdateLCDPanels(bool surfacesOnly = false)
+        class Surface
         {
-            List<IMyTerminalBlock> lcds = new List<IMyTerminalBlock>();
-            GridTerminalSystem.SearchBlocksOfName(defaultLCDNameTag_, lcds);
-            foreach (var block in lcds)
+            Program app_ = null;
+            IMyTextSurface surface_ = null;
+            int index_ = 0;
+            DateTime lastUpdate_ = DateTime.Now;
+
+            // configurations
+            Color surfaceBackgroundColor_ = defaultSurfaceBackgroundColor_;
+            Color logoBackgroundColor_ = defaultLogoBackgroundColor_;
+            Color logoForgroundColor_ = defaultLogoForgroundColor_;
+            Color UITextColor_ = defaultUITextColor_;
+            string UITextFont_ = defaultUITextFont_;
+            Vector2 UIFontSize_ = new Vector2();
+            float UIPadding_ = defaultUIPadding_;
+
+
+            public Surface(Program app, IMyTextSurface surface, int index = 0)
             {
-                IMyTextPanel lcd = block as IMyTextPanel;
-                if (lcd != null)
-                    DrawToSurface(lcd as IMyTextSurface);
+                app_ = app;
+                surface_ = surface;
+                index_ = index;
             }
-        }
 
 
-        public void DrawToSurface(IMyTextSurface panel)
-        {
-            // setup surface
-            panel.WriteText(string.Empty);
-            panel.ContentType = VRage.Game.GUI.TextPanel.ContentType.SCRIPT;
-            panel.Script = string.Empty;
-            panel.ScriptBackgroundColor = surfaceBackgroundColor_;
-            panel.ScriptForegroundColor = Color.Azure;
-
-            UIFontSize_ = panel.MeasureStringInPixels(new StringBuilder("M"), UITextFont_, 1.0f);
-
-            // draw
-            using (var frame = panel.DrawFrame())
+            public void shutdown()
             {
-                // background
-                //MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", position: new Vector2(256f), 
-                //    size: panel.TextureSize, color: surfaceBackgroundColor_);
-                //frame.Add(background);
-
-                // draw overlay
-                // header line
-                MySprite headerline = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(256f, 73f),
-                    new Vector2(512f, 5f));
-                frame.Add(headerline);
-
-                // footer line
-                MySprite footerline = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(256f, 512f - 54f),
-                    new Vector2(512f, 5f));
-                frame.Add(footerline);
-
-                // split lines
-                Vector2 splitLineSize = new Vector2(5f, 374f);
-                MySprite splitLine1 = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(350f, 256f + 5f), splitLineSize);
-                MySprite splitLine2 = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(167f, 256f + 5f), splitLineSize);
-                frame.Add(splitLine1);
-                frame.Add(splitLine2);
-
-                // draw informations
-                DrawHeader(frame, new Vector2(1f));
-                DrawModuleStateIndicators(frame, new Vector2(0f, 73f), new Vector2(167f, 385f));
-                DrawEnergieInformations(frame, new Vector2(350f, 73f), new Vector2(162f, 385f));
-                DrawStatusInformations(frame, new Vector2(167f, 73f), new Vector2(183f, 200f));
-                DrawFooter(frame, new Vector2(0f, 450f), new Vector2(512f, 54f));
+                // print shutdown message
             }
-        }
 
 
-        #region Single Drawing Methods
-        private void DrawHeader(MySpriteDrawFrame frame, Vector2 scale)
-        {
-            // logo
-            MySprite logoIcon1 = new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(40, 32), new Vector2(60, 60), logoBackgroundColor_);
-            MySprite logoIcon2 = new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(50, 32), new Vector2(50, 30), surfaceBackgroundColor_);
-            MySprite logoIcon3 = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(88, 50), new Vector2(125, 10), logoForgroundColor_);
-            frame.Add(logoIcon1);
-            frame.Add(logoIcon2);
-            frame.Add(logoIcon3);
-            MySprite logoText = MySprite.CreateText("RCS", "Monospace", new Color(0, 10, 85), 2f);
-            logoText.Position = new Vector2(40, 4);
-            logoText.Alignment = TextAlignment.LEFT;
-            frame.Add(logoText);
-
-            // version
-            MySprite version = MySprite.CreateText(rcsVersion_, UITextFont_, UITextColor_, 0.9f, TextAlignment.LEFT);
-            version.Position = new Vector2(160f, 40f);
-            frame.Add(version);
-        }
-
-
-        private void DrawFooter(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
-        {
-            // draw clock
-            string clockText = DateTime.Now.ToShortTimeString() + " " + DateTime.Now.ToShortDateString();
-            float scale = Math.Min((size.Y - (UIPadding_ * 2)) / UIFontSize_.Y, (size.X - (UIPadding_ * 2)) / (UIFontSize_.X * clockText.Length));
-
-            MySprite clock = MySprite.CreateText(clockText, UITextFont_, UITextColor_, scale);
-            clock.Position = new Vector2(position.X + size.X * 0.5f, position.Y + UIPadding_ + (size.Y - (UIFontSize_.Y * scale)) * 0.5f);
-            frame.Add(clock);
-        }
-
-
-        private void DrawEnergieInformations(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
-        {
-            float UIPadding3 = UIPadding_ * 3f;
-            float UIPadding4 = UIPadding_ * 4f;
-            Vector2 iconSize = new Vector2((size.X - UIPadding4) / 3f);
-
-            // energy bar
-            EnergieManager em = findModuleById("EM") as EnergieManager;
-            Vector2 barSize = new Vector2((size.X - UIPadding4) / 3f, size.Y - iconSize.Y - UIPadding3);
-            float barPosY = position.Y + 10f + (barSize.Y * 0.5f);
-
-            // battery bars
-            DrawProgressBarV(frame, em.BatteryPowerInUsage, new Vector2(position.X + barSize.X * 2.5f + UIPadding3, barPosY),
-                barSize, Color.Lerp(Color.Green, Color.Red, em.BatteryPowerInUsage), surfaceBackgroundColor_, 2f, Color.Azure);
-            DrawProgressBarV(frame, em.BatteryPowerLeft, new Vector2(position.X + barSize.X * 1.5f + (UIPadding_ * 2f), barPosY),
-                barSize, Color.Lerp(Color.Red, Color.Green, em.BatteryPowerLeft), surfaceBackgroundColor_, 2f, Color.Azure);
-
-            // Power generator bars
-            DrawProgressBarV(frame, em.GeneratorPowerInUsage, new Vector2(position.X + barSize.X * 0.5f + UIPadding_, barPosY),
-                barSize, Color.Lerp(Color.LightBlue, Color.Red, em.GeneratorPowerInUsage), surfaceBackgroundColor_, 2f, Color.Azure);
-
-            // draw icons
-            float iconPosY = position.Y + (iconSize.Y * 0.5f) + (UIPadding_ * 2f) + barSize.Y;
-
-            MySprite energy1 = new MySprite(SpriteType.TEXTURE, "IconEnergy", new Vector2(position.X + iconSize.X * 2.5f + UIPadding3, iconPosY), iconSize);
-            MySprite energy2 = new MySprite(SpriteType.TEXTURE, "IconEnergy", new Vector2(position.X + iconSize.X * 1.5f + (UIPadding_ * 2f), iconPosY), iconSize);
-            MySprite h2 = new MySprite(SpriteType.TEXTURE, "IconHydrogen", new Vector2(position.X + iconSize.X * 0.5f + UIPadding_, iconPosY), iconSize);
-            frame.Add(energy1);
-            frame.Add(energy2);
-            frame.Add(h2);
-        }
-
-
-        private void DrawModuleStateIndicators(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
-        {
-            float lineHeight = (size.Y - ((modules_.Count + 1) * UIPadding_)) / modules_.Count;
-            Vector2 fontScaleVector = new Vector2(((size.X * 0.6f) - (UIPadding_ * 3f)) / (UIFontSize_.X * 3), lineHeight / UIFontSize_.Y);
-            float fontScale = Math.Min(fontScaleVector.X, fontScaleVector.Y);
-
-            if (fontScale < 0.9f)
+            public bool processUpdate()
             {
-                // Draw text only
-                float offsetY = UIPadding_;
-                fontScale = Math.Min((size.X - (UIPadding_ * 2f)) / (UIFontSize_.X * 3), lineHeight / UIFontSize_.Y);
+                // time to update?
+                DateTime curTime = DateTime.Now;
+                if ((lastUpdate_ - curTime) < defaultLCDUpdateInterval_)
+                    return false;
 
-                // ID Text
-                foreach (var module in modules_)
+                lastUpdate_ = curTime;
+
+                // setup surface
+                surface_.WriteText(string.Empty);
+                surface_.ContentType = VRage.Game.GUI.TextPanel.ContentType.SCRIPT;
+                surface_.Script = string.Empty;
+                surface_.ScriptBackgroundColor = surfaceBackgroundColor_;
+                surface_.ScriptForegroundColor = Color.Azure;
+
+                UIFontSize_ = surface_.MeasureStringInPixels(new StringBuilder("M"), UITextFont_, 1.0f);
+
+                // draw
+                using (var frame = surface_.DrawFrame())
                 {
-                    MySprite id = MySprite.CreateText(module.Id, UITextFont_, moduleStateColor_[module.State], fontScale, TextAlignment.LEFT);
-                    id.Position = new Vector2(position.X + UIPadding_, position.Y + offsetY);
-                    frame.Add(id);
+                    // draw overlay
+                    // header line
+                    MySprite headerline = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(256f, 73f),
+                        new Vector2(512f, 5f));
+                    frame.Add(headerline);
 
-                    offsetY += lineHeight + UIPadding_;
+                    // footer line
+                    MySprite footerline = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(256f, 512f - 54f),
+                        new Vector2(512f, 5f));
+                    frame.Add(footerline);
+
+                    // split lines
+                    Vector2 splitLineSize = new Vector2(5f, 374f);
+                    MySprite splitLine1 = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(350f, 256f + 5f), splitLineSize);
+                    MySprite splitLine2 = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(167f, 256f + 5f), splitLineSize);
+                    frame.Add(splitLine1);
+                    frame.Add(splitLine2);
+
+                    // draw informations
+                    DrawHeader(frame, new Vector2(1f));
+                    DrawModuleStateIndicators(frame, new Vector2(0f, 73f), new Vector2(167f, 385f));
+                    DrawEnergieInformations(frame, new Vector2(350f, 73f), new Vector2(162f, 385f));
+                    DrawStatusInformations(frame, new Vector2(167f, 73f), new Vector2(183f, 200f));
+                    DrawFooter(frame, new Vector2(0f, 450f), new Vector2(512f, 54f));
                 }
-            }
-            else
-            {
-                float offsetY = UIPadding_ + ((lineHeight - (UIFontSize_.Y * fontScale)) * 0.5f);
-                float offsetX = (UIFontSize_.X * fontScale * 3f) + (UIPadding_ * 2f);
-                Vector2 boxSize = new Vector2(size.X - offsetX - UIPadding_, UIFontSize_.Y * fontScale);
 
-                // Draw with indicator box
-                foreach (var module in modules_)
+                return true;
+            }
+
+
+            #region Single Drawing Methods
+            private void DrawHeader(MySpriteDrawFrame frame, Vector2 scale)
+            {
+                // logo
+                MySprite logoIcon1 = new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(40, 32), new Vector2(60, 60), logoBackgroundColor_);
+                MySprite logoIcon2 = new MySprite(SpriteType.TEXTURE, "Circle", new Vector2(50, 32), new Vector2(50, 30), surfaceBackgroundColor_);
+                MySprite logoIcon3 = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(88, 50), new Vector2(125, 10), logoForgroundColor_);
+                frame.Add(logoIcon1);
+                frame.Add(logoIcon2);
+                frame.Add(logoIcon3);
+                MySprite logoText = MySprite.CreateText("RCS", "Monospace", new Color(0, 10, 85), 2f);
+                logoText.Position = new Vector2(40, 4);
+                logoText.Alignment = TextAlignment.LEFT;
+                frame.Add(logoText);
+
+                // version
+                MySprite version = MySprite.CreateText(rcsVersion_, UITextFont_, UITextColor_, 0.9f, TextAlignment.LEFT);
+                version.Position = new Vector2(160f, 40f);
+                frame.Add(version);
+            }
+
+
+            private void DrawFooter(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
+            {
+                // draw clock
+                string clockText = DateTime.Now.ToShortTimeString() + " " + DateTime.Now.ToShortDateString();
+                float scale = Math.Min((size.Y - (UIPadding_ * 2)) / UIFontSize_.Y, (size.X - (UIPadding_ * 2)) / (UIFontSize_.X * clockText.Length));
+
+                MySprite clock = MySprite.CreateText(clockText, UITextFont_, UITextColor_, scale);
+                clock.Position = new Vector2(position.X + size.X * 0.5f, position.Y + UIPadding_ + (size.Y - (UIFontSize_.Y * scale)) * 0.5f);
+                frame.Add(clock);
+            }
+
+
+            private void DrawEnergieInformations(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
+            {
+                float UIPadding3 = UIPadding_ * 3f;
+                float UIPadding4 = UIPadding_ * 4f;
+                Vector2 iconSize = new Vector2((size.X - UIPadding4) / 3f);
+
+                EnergieManager em = app_.findModuleById("EM") as EnergieManager;
+                InventoryManager im = app_.findModuleById("IM") as InventoryManager;
+
+                // general bar values
+                Vector2 barSize = new Vector2((size.X - UIPadding4) / 3f, size.Y - iconSize.Y - UIPadding3);
+                float barPosY = position.Y + 10f + (barSize.Y * 0.5f);
+
+                // battery bars
+                DrawProgressBarV(frame, em.EnergieInUsage, new Vector2(position.X + barSize.X * 2.5f + UIPadding3, barPosY),
+                    barSize, Color.Lerp(Color.Green, Color.Red, em.EnergieInUsage), surfaceBackgroundColor_, 2f, Color.Azure);
+                DrawProgressBarV(frame, em.BatteryPowerLeft, new Vector2(position.X + barSize.X * 1.5f + (UIPadding_ * 2f), barPosY),
+                    barSize, Color.Lerp(Color.Red, Color.Green, em.BatteryPowerLeft), surfaceBackgroundColor_, 2f, Color.Azure);
+
+                // Power generator bars
+                DrawProgressBarV(frame, (float)im.HydrogenFillRatio, new Vector2(position.X + barSize.X * 0.5f + UIPadding_, barPosY),
+                    barSize, Color.Lerp(Color.LightBlue, Color.Red, (float)im.HydrogenFillRatio), surfaceBackgroundColor_, 2f, Color.Azure);
+
+                // draw icons
+                float iconPosY = position.Y + (iconSize.Y * 0.5f) + (UIPadding_ * 2f) + barSize.Y;
+
+                MySprite energy1 = new MySprite(SpriteType.TEXTURE, "IconEnergy", new Vector2(position.X + iconSize.X * 2.5f + UIPadding3, iconPosY), iconSize);
+                MySprite energy2 = new MySprite(SpriteType.TEXTURE, "IconEnergy", new Vector2(position.X + iconSize.X * 1.5f + (UIPadding_ * 2f), iconPosY), iconSize);
+                MySprite h2 = new MySprite(SpriteType.TEXTURE, "IconHydrogen", new Vector2(position.X + iconSize.X * 0.5f + UIPadding_, iconPosY), iconSize);
+                frame.Add(energy1);
+                frame.Add(energy2);
+                frame.Add(h2);
+            }
+
+
+            private void DrawModuleStateIndicators(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
+            {
+                float lineHeight = (size.Y - ((app_.modules_.Count + 1) * UIPadding_)) / app_.modules_.Count;
+                Vector2 fontScaleVector = new Vector2(((size.X * 0.6f) - (UIPadding_ * 3f)) / (UIFontSize_.X * 3), lineHeight / UIFontSize_.Y);
+                float fontScale = Math.Min(fontScaleVector.X, fontScaleVector.Y);
+
+                if (fontScale < 0.9f)
                 {
+                    // Draw text only
+                    float offsetY = UIPadding_;
+                    fontScale = Math.Min((size.X - (UIPadding_ * 2f)) / (UIFontSize_.X * 3), lineHeight / UIFontSize_.Y);
+
                     // ID Text
-                    MySprite id = MySprite.CreateText(module.Id, UITextFont_, UITextColor_, fontScale, TextAlignment.LEFT);
-                    id.Position = new Vector2(position.X + UIPadding_, position.Y + offsetY);
-                    frame.Add(id);
+                    foreach (var module in app_.modules_)
+                    {
+                        MySprite id = MySprite.CreateText(module.Id, UITextFont_, app_.moduleStateColor_[module.State], fontScale, TextAlignment.LEFT);
+                        id.Position = new Vector2(position.X + UIPadding_, position.Y + offsetY);
+                        frame.Add(id);
 
-                    // Indicator
-                    MySprite indicator = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(offsetX, position.Y + offsetY + (boxSize.Y * 0.5f)),
-                        boxSize, moduleStateColor_[module.State], alignment: TextAlignment.LEFT);
-                    frame.Add(indicator);
+                        offsetY += lineHeight + UIPadding_;
+                    }
+                }
+                else
+                {
+                    float offsetY = UIPadding_ + ((lineHeight - (UIFontSize_.Y * fontScale)) * 0.5f);
+                    float offsetX = (UIFontSize_.X * fontScale * 3f) + (UIPadding_ * 2f);
+                    Vector2 boxSize = new Vector2(size.X - offsetX - UIPadding_, UIFontSize_.Y * fontScale);
 
+                    // Draw with indicator box
+                    foreach (var module in app_.modules_)
+                    {
+                        // ID Text
+                        MySprite id = MySprite.CreateText(module.Id, UITextFont_, UITextColor_, fontScale, TextAlignment.LEFT);
+                        id.Position = new Vector2(position.X + UIPadding_, position.Y + offsetY);
+                        frame.Add(id);
+
+                        // Indicator
+                        MySprite indicator = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(offsetX, position.Y + offsetY + (boxSize.Y * 0.5f)),
+                            boxSize, app_.moduleStateColor_[module.State], alignment: TextAlignment.LEFT);
+                        frame.Add(indicator);
+
+                        offsetY += lineHeight + UIPadding_;
+                    }
+                }
+            }
+
+
+            private void DrawStatusInformations(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
+            {
+                float offsetX = position.X + (size.X * 0.5f);
+                float offsetY = position.Y + UIPadding_;
+
+                const int lineCount = 5;
+                const int charCount = 10;
+
+                float lineHeight = (size.Y - ((lineCount + 1) * UIPadding_)) / lineCount;
+                float fontScale = Math.Min((size.X - (UIPadding_ * 2f)) / (UIFontSize_.X * charCount), lineHeight / UIFontSize_.Y);
+
+                // docking state
+                DockingController dc = app_.findModuleById("DC") as DockingController;
+                if (dc != null)
+                {
+                    // connect state
+                    Color csSColor = dc.IsConnected ? Color.Green : (dc.IsReadyToConnect ? Color.Yellow : UITextColor_);
+                    MySprite csText = MySprite.CreateText("Connected", UITextFont_, csSColor, fontScale);
+                    csText.Position = new Vector2(offsetX, offsetY);
+                    frame.Add(csText);
+                    offsetY += lineHeight + UIPadding_;
+
+                    // home base
+                    Color hbColor = dc.IsHomeBase ? Color.Green : (dc.IsConnected || dc.IsReadyToConnect ? Color.Red : UITextColor_);
+                    MySprite hbText = MySprite.CreateText("Home Base", UITextFont_, hbColor, fontScale);
+                    hbText.Position = new Vector2(offsetX, offsetY);
+                    frame.Add(hbText);
+                    offsetY += lineHeight + UIPadding_;
+                }
+
+                // RCS states
+                MainRCSSystem rcs = app_.findModuleById("RCS") as MainRCSSystem;
+                if (rcs != null)
+                {
+                    Color color = rcs.IsParking ? Color.Red : UITextColor_;
+                    MySprite text = MySprite.CreateText("Parking", UITextFont_, color, fontScale);
+                    text.Position = new Vector2(offsetX, offsetY);
+                    frame.Add(text);
                     offsetY += lineHeight + UIPadding_;
                 }
             }
-        }
+            #endregion // Single Drawing Methods
 
 
-        private void DrawStatusInformations(MySpriteDrawFrame frame, Vector2 position, Vector2 size)
-        {
-            float offsetX = position.X + (size.X * 0.5f);
-            float offsetY = position.Y + UIPadding_;
-
-            const int lineCount = 5;
-            const int charCount = 10;
-
-            float lineHeight = (size.Y - ((lineCount + 1) * UIPadding_)) / lineCount;
-            float fontScale = Math.Min((size.X - (UIPadding_ * 2f)) / (UIFontSize_.X * charCount), lineHeight / UIFontSize_.Y);
-
-            // docking state
-            DockingController dc = findModuleById("DC") as DockingController;
-            if (dc != null)
+            #region Bar Tools
+            private void DrawProgressBarH(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
+                Color barColor, Color backgroundColor)
             {
-                // connect state
-                Color csSColor = dc.IsConnected ? Color.Green : (dc.IsReadyToConnect ? Color.Yellow : UITextColor_);
-                MySprite csText = MySprite.CreateText("Connected", UITextFont_, csSColor, fontScale);
-                csText.Position = new Vector2(offsetX, offsetY);
-                frame.Add(csText);
-                offsetY += lineHeight + UIPadding_;
-
-                // home base
-                Color hbColor = dc.IsHomeBase ? Color.Green : (dc.IsConnected || dc.IsReadyToConnect ? Color.Red : UITextColor_);
-                MySprite hbText = MySprite.CreateText("Home Base", UITextFont_, hbColor, fontScale);
-                hbText.Position = new Vector2(offsetX, offsetY);
-                frame.Add(hbText);
-                offsetY += lineHeight + UIPadding_;
+                DrawProgressBarH(frame, fillRatio, position, size, barColor, backgroundColor, 0f, new Color(0f));
             }
 
-            // RCS states
-            MainRCSSystem rcs = findModuleById("RCS") as MainRCSSystem;
-            if (rcs != null)
+
+            private void DrawProgressBarH(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
+                Color barColor, Color backgroundColor, float borderSize, Color borderColor)
             {
-                Color color = rcs.IsParking ? Color.Red : UITextColor_;
-                MySprite text = MySprite.CreateText("Parking", UITextFont_, color, fontScale);
-                text.Position = new Vector2(offsetX, offsetY);
-                frame.Add(text);
-                offsetY += lineHeight + UIPadding_;
-            }
-        }
-        #endregion // Single Drawing Methods
+                // draw border
+                if (borderSize > 0f)
+                {
+                    MySprite border = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, borderColor);
+                    frame.Add(border);
+                }
 
-        #region Bar Tools
-        private void DrawProgressBarH(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-            Color barColor, Color backgroundColor)
-        {
-            DrawProgressBarH(frame, fillRatio, position, size, barColor, backgroundColor, 0f, new Color(0f));
-        }
+                // draw background
+                float positionBorderX = position.X - (borderSize * 0.5f);
+                float positionBorderY = position.Y;
 
+                MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionBorderX, positionBorderY),
+                    size - (borderSize * 2f), backgroundColor);
+                frame.Add(background);
 
-        private void DrawProgressBarH(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-            Color barColor, Color backgroundColor, float borderSize, Color borderColor)
-        {
-            // draw border
-            if (borderSize > 0f)
-            {
-                MySprite border = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, borderColor);
-                frame.Add(border);
-            }
+                // draw bar
+                float sizeX = (size.X - (borderSize * 2f)) * fillRatio;
+                float sizeY = size.Y - (borderSize * 2f);
 
-            // draw background
-            float positionBorderX = position.X - (borderSize * 0.5f);
-            float positionBorderY = position.Y;
+                float positionX = position.X - ((size.X - sizeX) * 0.5f) + borderSize;
+                float positionY = position.Y;
 
-            MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionBorderX, positionBorderY),
-                size - (borderSize * 2f), backgroundColor);
-            frame.Add(background);
-
-            // draw bar
-            float sizeX = (size.X - (borderSize * 2f)) * fillRatio;
-            float sizeY = size.Y - (borderSize * 2f);
-
-            float positionX = position.X - ((size.X - sizeX) * 0.5f) + borderSize;
-            float positionY = position.Y;
-
-            MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionX, positionY), new Vector2(sizeX, sizeY), barColor);
-            frame.Add(bar);
-        }
-
-
-        private void DrawProgressBarV(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-            Color barColor, Color backgroundColor)
-        {
-            DrawProgressBarV(frame, fillRatio, position, size, barColor, backgroundColor, 0f, new Color(0f));
-        }
-
-
-        private void DrawProgressBarV(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-            Color barColor, Color backgroundColor, float borderSize, Color borderColor)
-        {
-            // draw border
-            if (borderSize > 0f)
-            {
-                MySprite border = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, borderColor);
-                frame.Add(border);
+                MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionX, positionY), new Vector2(sizeX, sizeY), barColor);
+                frame.Add(bar);
             }
 
-            // draw background
-            float positionBorderX = position.X;
-            float positionBorderY = position.Y + (borderSize * 0.5f);
 
-            MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionBorderX, positionBorderY),
-                size - (borderSize * 2f), backgroundColor);
-            frame.Add(background);
+            private void DrawProgressBarV(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
+                Color barColor, Color backgroundColor)
+            {
+                DrawProgressBarV(frame, fillRatio, position, size, barColor, backgroundColor, 0f, new Color(0f));
+            }
 
-            // draw bar
-            float sizeX = size.X - (borderSize * 2f);
-            float sizeY = (size.Y - (borderSize * 2f)) * fillRatio;
 
-            float positionX = position.X;
-            float positionY = position.Y + ((size.Y - sizeY) * 0.5f) - borderSize;
+            private void DrawProgressBarV(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
+                Color barColor, Color backgroundColor, float borderSize, Color borderColor)
+            {
+                // draw border
+                if (borderSize > 0f)
+                {
+                    MySprite border = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, borderColor);
+                    frame.Add(border);
+                }
 
-            MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionX, positionY), new Vector2(sizeX, sizeY), barColor);
-            frame.Add(bar);
+                // draw background
+                float positionBorderX = position.X;
+                float positionBorderY = position.Y + (borderSize * 0.5f);
+
+                MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionBorderX, positionBorderY),
+                    size - (borderSize * 2f), backgroundColor);
+                frame.Add(background);
+
+                // draw bar
+                float sizeX = size.X - (borderSize * 2f);
+                float sizeY = (size.Y - (borderSize * 2f)) * fillRatio;
+
+                float positionX = position.X;
+                float positionY = position.Y + ((size.Y - sizeY) * 0.5f) - borderSize;
+
+                MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionX, positionY), new Vector2(sizeX, sizeY), barColor);
+                frame.Add(bar);
+            }
+            #endregion // Bar Tools
         }
-        #endregion // Bar Tools
 
+
+        private void UpdateLCDPanels()
+        {
+            foreach (var surface in surfaces_)
+            {
+                if (surface.processUpdate())
+                    return;
+            }
+        }
+
+
+        private void ShutdownLCDPanels()
+        {
+            foreach(var surface in surfaces_)
+                surface.shutdown();
+        }
         #endregion // Visualization
 
-        #region Commandline and Config
+
+        #region Commandline
         public bool parseCommandLine(string args)
         {
             //MyCommandLine parser;
@@ -362,20 +401,361 @@ namespace IngameScript
         }
         #endregion
 
+
+        #region Configuration
+        class Configuration
+        {
+            Program app_ = null;
+            MyIni config_ = new MyIni();
+
+            public delegate bool SearchKeyCallback(MyIniKey key);
+            public delegate bool SearchSectionCallback(string section);
+
+
+            public Configuration(Program app)
+            {
+                app_ = app;
+            }
+
+
+            public bool readConfiguration()
+            {
+                if (!config_.TryParse(app_.Me.CustomData))
+                    return false;
+
+                // read all sections
+                List<string> sections = new List<string>();
+                config_.GetSections(sections);
+                foreach(var section in sections)
+                {
+                    List<MyIniKey> keys = new List<MyIniKey>();
+                    config_.GetKeys(section, keys);
+                    foreach(var key in keys)
+                    {
+                        var value = config_.Get(key);
+                    }
+                }
+
+                return true;
+            }
+
+
+            public void writeConfiguration()
+            {
+                app_.Me.CustomData = config_.ToString();
+            }
+
+
+            public void invalidate()
+            {
+                config_.Clear();
+            }
+
+
+            #region Tools
+            public bool sectionExists(string section)
+            {
+                return config_.ContainsSection(section);
+            }
+
+
+            public bool keyExists(string section, string key)
+            {
+                return config_.ContainsKey(section, key);
+            }
+
+
+            public bool search(string section, SearchKeyCallback callback, out string key)
+            {
+                key = string.Empty;
+                List<MyIniKey> keys = new List<MyIniKey>();
+                config_.GetKeys(section, keys);
+                foreach (MyIniKey INIKey in keys)
+                {
+                    if (callback(INIKey))
+                    {
+                        key = INIKey.Name;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+
+            public void search(string section, SearchKeyCallback callback, out List<string> keys)
+            {
+                keys = new List<string>();
+                List<MyIniKey> INIKeys = new List<MyIniKey>();
+                config_.GetKeys(section, INIKeys);
+                foreach (MyIniKey INIKey in INIKeys)
+                {
+                    if (callback(INIKey))
+                        keys.Add(INIKey.Name);
+                }
+            }
+
+
+            public bool search(SearchSectionCallback callback, out string section)
+            {
+                section = string.Empty;
+                List<string> sections = new List<string>();
+                config_.GetSections(sections);
+                foreach(string INISection in sections)
+                {
+                    if (callback(INISection))
+                        return true;
+                }
+
+                return false;
+            }
+
+
+            public void search(SearchSectionCallback callback, out List<string> sections)
+            {
+                sections = new List<string>();
+                List<string> INISections = new List<string>();
+                config_.GetSections(INISections);
+                foreach (string INISection in INISections)
+                {
+                    if (callback(INISection))
+                        sections.Add(INISection);
+                }
+            }
+            #endregion // Tools
+
+
+            #region Register Keys
+            public void registerKey(string section, string key, bool value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+
+
+            public void registerKey(string section, string key, int value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+
+
+            public void registerKey(string section, string key, float value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+
+
+            public void registerKey(string section, string key, string value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+
+
+            public void registerKey(string section, string key, Vector2 value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+
+
+            public void registerKey(string section, string key, Vector3 value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+
+
+            public void registerKey(string section, string key, Color value, string comment = "")
+            {
+                // write default value
+                if (!keyExists(section, key))
+                    setValue(section, key, value, comment);
+            }
+            #endregion // Register Keys
+
+
+            #region Set Values
+            public void setValue(string section, string key, bool value, string comment = "")
+            {
+                config_.Set(section, key, value);
+                config_.SetComment(section, key, comment);
+            }
+
+
+            public void setValue(string section, string key, int value, string comment = "")
+            {
+                config_.Set(section, key, value);
+                config_.SetComment(section, key, comment);
+            }
+
+
+            public void setValue(string section, string key, float value, string comment = "")
+            {
+                config_.Set(section, key, value);
+                config_.SetComment(section, key, comment);
+            }
+
+
+            public void setValue(string section, string key, string value, string comment = "")
+            {
+                config_.Set(section, key, value);
+                config_.SetComment(section, key, comment);
+            }
+
+
+            public void setValue(string section, string key, Vector2 value, string comment = "")
+            {
+                config_.Set(section, key, string.Format("{0},{1}", value.X, value.Y));
+                config_.SetComment(section, key, comment);
+            }
+
+
+            public void setValue(string section, string key, Vector3 value, string comment = "")
+            {
+                config_.Set(section, key, string.Format("{0},{1},{2}", value.X, value.Y, value.Z));
+                config_.SetComment(section, key, comment);
+            }
+
+
+            public void setValue(string section, string key, Color value, string comment = "")
+            {
+                config_.Set(section, key, string.Format("{0},{1},{2},{3}", value.B, value.G, value.B, value.A));
+                config_.SetComment(section, key, comment);
+            }
+            #endregion
+
+
+            #region Get Values
+            public void getValue(string section, string key, out bool value, bool defaultValue = false)
+            {
+                value = config_.Get(section, key).ToBoolean(defaultValue);
+            }
+
+
+            public void getValue(string section, string key, out int value, int defaultValue = 0)
+            {
+                value = config_.Get(section, key).ToInt32(defaultValue);
+            }
+
+
+            public void getValue(string section, string key, out float value, float defaultValue = 0f)
+            {
+                value = (float)config_.Get(section, key).ToDouble(defaultValue);
+            }
+
+
+            public void getValue(string section, string key, out string value, string defaultValue = "")
+            {
+                value = config_.Get(section, key).ToString(defaultValue);
+            }
+
+
+            public void getValue(string section, string key, out Vector2 value, Vector2 defaultValue)
+            {
+                string raw = config_.Get(section, key).ToString();
+                string[] parts = raw.Split(',');
+
+                if (parts.Length == 2)
+                {
+                    float x = 0f;
+                    float y = 0f;
+
+                    float.TryParse(parts[0].Trim(), out x);
+                    float.TryParse(parts[1].Trim(), out y);
+
+                    value = new Vector2(x, y);
+                }
+                else
+                    value = defaultValue;
+            }
+
+
+            public void getValue(string section, string key, out Vector3 value, Vector3 defaultValue)
+            {
+                string raw = config_.Get(section, key).ToString();
+                string[] parts = raw.Split(',');
+
+                if (parts.Length == 3)
+                {
+                    float x = 0f;
+                    float y = 0f;
+                    float z = 0f;
+
+                    float.TryParse(parts[0].Trim(), out x);
+                    float.TryParse(parts[1].Trim(), out y);
+                    float.TryParse(parts[2].Trim(), out z);
+
+                    value = new Vector3(x, y, z);
+                }
+                else
+                    value = defaultValue;
+            }
+
+
+            public void getValue(string section, string key, out Color value, Color defaultValue)
+            {
+                string raw = config_.Get(section, key).ToString();
+                string[] parts = raw.Split(',');
+
+                if (parts.Length >= 3)
+                {
+                    int r = 0;
+                    int g = 0;
+                    int b = 0;
+                    int a = 0;
+
+                    int.TryParse(parts[0].Trim(), out r);
+                    int.TryParse(parts[1].Trim(), out g);
+                    int.TryParse(parts[2].Trim(), out b);
+
+                    if (!int.TryParse(parts[3].Trim(), out a))
+                        a = 255;
+
+                    value = new Color(
+                        MathHelper.Clamp(r, 0, 255),
+                        MathHelper.Clamp(g, 0, 255), 
+                        MathHelper.Clamp(b, 0, 255), 
+                        MathHelper.Clamp(a, 0, 255));
+                }
+                else
+                    value = defaultValue;
+            }
+            #endregion // Get Values
+        }
+        #endregion // Configuration
+
+
         #region RCS System State
-        bool isInvalid = true;
-        private int failureCounter_ = 0;
-        private Exception lastException_ = null;
         int nextModulePosition_ = 0;
         bool useFastMode_ = defaultUseFastMode_;
+        Configuration config_ = null;
+        Action<UpdateType> stateHandler_ = null;
 
 
         #region System State Handler
-        private void handleInvalidateState()
+        private void handleInvalidateState(UpdateType updateType)
         {
             foreach (var module in modules_)
             {
                 module.onInvalidate();
+            }
+
+            // regenerate configuration
+            config_.invalidate();
+            if (!config_.readConfiguration())
+            {
+                // kernel panic ^^
+                stateHandler_ = handlePanicState;
+                return;
             }
 
             // scan all blocks
@@ -384,6 +764,15 @@ namespace IngameScript
                 //if (!block.IsSameConstructAs(block))
                 if (Me.CubeGrid != block.CubeGrid)
                     return false;
+
+                // search for LCD Panels
+                // ToDo: Search for Panels inside cockpits and PB's
+                IMyTextSurface surface = block as IMyTextSurface;
+                if (surface != null && block.CustomName.Contains(defaultLCDNameTag_))
+                {
+                    surfaces_.Add(new Surface(this, surface));
+                    return false;
+                }
 
                 foreach (var module in modules_)
                 {
@@ -412,7 +801,7 @@ namespace IngameScript
                 module.onValidate();
             }
 
-            isInvalid = false;
+            stateHandler_ = handleRunningState;
             nextModulePosition_ = 0;
         }
 
@@ -425,23 +814,33 @@ namespace IngameScript
                 module.onProcss(updateType);
 
                 if (nextModulePosition_ >= modules_.Count)
-                {
                     nextModulePosition_ = 0;
-                    UpdateLCDPanels(false);
-                }
-                else
-                    UpdateLCDPanels(true);
             }
             else
             {
                 foreach (var module in modules_)
+                {
                     module.onProcss(updateType);
-
-                UpdateLCDPanels(false);
+                }
             }
+
+            UpdateLCDPanels();
+        }
+
+
+        private void handlePanicState(UpdateType updateType)
+        {
+            Echo("A kernel panic is occurred!");
+
+            // ToDo: Shutoff all panels
+            ShutdownLCDPanels();
+
+            // stop automatic updates
+            Runtime.UpdateFrequency = UpdateFrequency.None;
         }
         #endregion // System State Handler
         #endregion // RCS System State
+
 
         #region Modul System
         /*!
@@ -658,6 +1057,7 @@ namespace IngameScript
             return false;
         }
         #endregion
+
 
         #region Module implementations
         /*!
@@ -1432,24 +1832,6 @@ namespace IngameScript
             }
 
 
-            public int BatteriesActive
-            {
-                get
-                {
-                    return batteryAmountOfActive_;
-                }
-            }
-
-
-            public int BatteriesRechargin
-            {
-                get
-                {
-                    return batteryAmountInRechargeMode_;
-                }
-            }
-
-
             public float GeneratorPowerInUsage
             {
                 get
@@ -1466,6 +1848,15 @@ namespace IngameScript
                     return generatorRunning_;
                 }
             }
+
+
+            public float EnergieInUsage
+            {
+                get
+                {
+                    return (batteryCurrentOutput_ + generatorCurrentOutput_) / (batteryMaxOutput_ + generatorMaxOutput_);
+                }
+            }
             #endregion
 
             /*!
@@ -1475,8 +1866,6 @@ namespace IngameScript
              */
             #region Battery Management
             // status variables
-            int batteryAmountInRechargeMode_ = 0;
-            int batteryAmountOfActive_ = 0;
             float batteryPowerLeft_ = 0f;
             float batteryPowerInUsage_ = 0f;
             float batteryMaxStored_ = 0f;
@@ -1485,27 +1874,24 @@ namespace IngameScript
             float batteryCurrentOutput_ = 0f;
 
             // Threshold values. All values in percentage. 1 == 100% | 0 == 0%
-            float batteryIsFull_ = 0.99f;
-            float batteryNeedsRecharge_ = 0.05f;
+            float batteryIsFull_ = 0.90f;
 
-            int batteryTickCount_ = 0;
 
-            /*!
-             * Recalculate the amount of active an recharging batteries
-             */
-            private void calculateBatteryStateCounts()
+            private int rechargeAbleBatteries()
             {
-                batteryAmountInRechargeMode_ = 0;
-                batteryAmountOfActive_ = 0;
+                int active = 0;
+                int recharge = 0;
 
-                foreach (var battery in batteries_)
+                foreach (var bat in batteries_)
                 {
-                    if (isActive(battery))
+                    if (isActive(bat))
                     {
-                        batteryAmountOfActive_++;
-                        batteryAmountInRechargeMode_ += battery.ChargeMode == ChargeMode.Recharge ? 1 : 0;
+                        active++;
+                        recharge += bat.ChargeMode == ChargeMode.Recharge ? 1 : 0;
                     }
                 }
+
+                return active - recharge;
             }
 
 
@@ -1514,125 +1900,81 @@ namespace IngameScript
              * method has changed one state of a battery the method will
              * return true. Otherwise it will return false.
              */
-            private bool hasOneBatteryManaged()
+            private void processBatteries()
             {
-                int batteriesActive = 0;
-                int batteriesRecharging = 0;
-
-                // we are connected, so we want to load all batteries. But we neet to keep at least
-                // one battery in discharge or auto mode.
-                if (dc_.IsHomeBase)
-                {
-                    if (batteryTickCount_-- > 0)
-                        return false;
-                    batteryTickCount_ = 10;
-
-                    calculateBatteryStateCounts();
-
-                    foreach (var battery in batteries_)
-                    {
-                        float curValue = battery.CurrentStoredPower / battery.MaxStoredPower;
-
-                        if (battery.ChargeMode != ChargeMode.Recharge &&
-                            batteryAmountInRechargeMode_ < (batteryAmountOfActive_ - 1))
-                        {
-                            if (curValue <= (batteryIsFull_ - batteryNeedsRecharge_))
-                                battery.ChargeMode = ChargeMode.Recharge;
-                        }
-                        else
-                            battery.ChargeMode = ChargeMode.Auto;
-                    }
-
-                    return false;
-                }
-
-
-                // we are not connected. So we need to manage all batterys
                 float maxStored = 0f;
                 float maxOut = 0f;
                 float currentStored = 0f;
                 float currentOut = 0f;
 
-                foreach (var battery in batteries_)
+
+                // we are connected, so we want to load all batteries. But we neet to keep at least
+                // one battery in discharge or auto mode.
+                if (dc_.IsHomeBase)
                 {
-                    // battery is deactivated, try to activate
-                    if (!isActive(battery))
-                    {
-                        // if this block can be reactivated, then we wait for the next tick to process the hole state
-                        // includ this battery.
-                        activateBlock(battery);
-                        if (isActive(battery))
-                        {
-                            battery.ChargeMode = ChargeMode.Auto;
-                            calculateBatteryStateCounts();
-                            return true;
-                        }
-                    }
-                    else
-                        batteriesActive++;
+                    int rechargeAble = rechargeAbleBatteries();
 
-                    // collect informations
-                    currentOut += battery.CurrentOutput;
-                    currentStored += battery.CurrentStoredPower;
-                    maxOut += battery.MaxOutput;
-                    maxStored += battery.MaxStoredPower;
-
-                    // switch battery to recharge mode
-                    if (battery.ChargeMode == ChargeMode.Discharge)
+                    foreach (var battery in batteries_)
                     {
-                        // switch to charge mode if the battery is on low power and we are has one left battery in
-                        // auto or discharge mode.
-                        if ((battery.CurrentStoredPower / battery.MaxStoredPower) <= batteryNeedsRecharge_)
+                        // collect informations
+                        currentOut += battery.CurrentOutput;
+                        currentStored += battery.CurrentStoredPower;
+                        maxOut += battery.MaxOutput;
+                        maxStored += battery.MaxStoredPower;
+
+                        if (battery.ChargeMode != ChargeMode.Recharge)
                         {
-                            // switch to recharge if we have enough power stored, otherwise switch to auto
-                            if ((battery.CurrentOutput / battery.MaxOutput) <= (1f - batteryNeedsRecharge_) ||
-                                batteryAmountInRechargeMode_ == (batteryAmountOfActive_ - 1))
-                                battery.ChargeMode = ChargeMode.Auto;
-                            else
+                            float curValue = battery.CurrentStoredPower / battery.MaxStoredPower;
+                            if (curValue <= batteryIsFull_ && rechargeAble > 1)
                             {
                                 battery.ChargeMode = ChargeMode.Recharge;
-                                batteryAmountInRechargeMode_++;
+                                rechargeAble--;
+                                continue;
                             }
-
-                            return true;
-                        }
-                    }
-                    else if (battery.ChargeMode == ChargeMode.Recharge)
-                    {
-                        batteriesRecharging++;
-
-                        // switch battery back to discharge mode if it's full
-                        if ((battery.CurrentStoredPower / battery.MaxStoredPower) >= batteryIsFull_)
-                        {
-                            battery.ChargeMode = ChargeMode.Discharge;
-                            batteryAmountInRechargeMode_--;
-                            return true;
                         }
 
-                        // or we need the power. in this case we set this battery to auto
-                        if ((currentOut / maxOut) >= 0.9f)
-                        {
+                        if (battery.ChargeMode != ChargeMode.Auto)
                             battery.ChargeMode = ChargeMode.Auto;
-                            batteryAmountInRechargeMode_--;
-                            return true;
-                        }
-                    }
-                    else
-                    {
-                        // switch to recharge mode if we have enough power to load
-                        // our battery
-                        if (battery.CurrentInput > battery.CurrentOutput &&
-                            (battery.CurrentStoredPower / battery.MaxStoredPower) <= batteryNeedsRecharge_)
-                        {
-                            battery.ChargeMode = ChargeMode.Recharge;
-                            batteryAmountInRechargeMode_++;
-                            return true;
-                        }
                     }
                 }
+                // we are not connected. So we need to manage all batteries
+                else
+                {
+                    foreach (var battery in batteries_)
+                    {
+                        // battery is deactivated, try to activate
+                        if (!isActive(battery))
+                        {
+                            // if this block can be reactivated, then we wait for the next tick to process the hole state
+                            // includ this battery.
+                            activateBlock(battery);
+                            if (isActive(battery))
+                            {
+                                battery.ChargeMode = ChargeMode.Auto;
+                                return;
+                            }
+                        }
 
-                batteryAmountInRechargeMode_ = batteriesRecharging;
-                batteryAmountOfActive_ = batteriesActive;
+                        // if powerlevel is low we set all batteries to auto
+                        if (batteryPowerLeft_ <= generatorActivateAtPowerLevel_)
+                        {
+                            if (battery.ChargeMode != ChargeMode.Auto)
+                                battery.ChargeMode = ChargeMode.Auto;
+                        }
+                        // otherwise we have enough power to set all batteries to discharge
+                        else
+                        {
+                            if (battery.ChargeMode != ChargeMode.Discharge)
+                                battery.ChargeMode = ChargeMode.Discharge;
+                        }
+
+                        // collect informations
+                        currentOut += battery.CurrentOutput;
+                        currentStored += battery.CurrentStoredPower;
+                        maxOut += battery.MaxOutput;
+                        maxStored += battery.MaxStoredPower;
+                    }
+                }
 
                 batteryPowerLeft_ = currentStored / maxStored;
                 batteryPowerInUsage_ = currentOut / maxOut;
@@ -1641,7 +1983,7 @@ namespace IngameScript
                 batteryMaxStored_ = maxStored;
                 batteryCurrentOutput_ = currentOut;
                 batteryCurrentStored_ = currentStored;
-                return false;
+                return;
             }
             #endregion
 
@@ -1673,10 +2015,10 @@ namespace IngameScript
             }
 
 
-            private bool hasOneGeneratorManaged()
+            private void processGenerators()
             {
                 // shutdown all genertors. We don't need them if we are connected
-                if (dc_.IsConnected)
+                if (dc_.IsHomeBase)
                 {
                     if (!generatorInConnectedMode_)
                     {
@@ -1687,10 +2029,11 @@ namespace IngameScript
                         generatorMaxOutput_ = 0f;
                     }
 
-                    return false;
+                    return;
                 }
-                else if (generatorInConnectedMode_)
+                else
                     generatorInConnectedMode_ = false;
+
 
                 float currentOut = 0f;
                 float maxOut = 0f;
@@ -1701,37 +2044,33 @@ namespace IngameScript
                     currentOut += generator.CurrentOutput;
                     maxOut += generator.MaxOutput;
 
-
                     if (isActive(generator))
                     {
                         running++;
 
                         // we don't need no more power again. So we can deactivate a generator
                         // to save resources
-                        if (batteryAmountInRechargeMode_ == 0 || batteryPowerLeft_ > (1f - generatorActivateAtUsageLevel_))
+                        if (batteryPowerLeft_ > (1f - generatorActivateAtUsageLevel_))
                         {
                             if (generator.CurrentOutput < (batteryMaxOutput_ - batteryCurrentOutput_))
                             {
                                 deactivateBlock(generator);
                                 generatorRunning_--;
-                                return true;
+                                return;
                             }
                         }
                     }
                     else
                     {
-                        // we are not connected, so we need to manage all generators
-                        // activate a generator, prefer the generator with the highest output
+                        // check if we need some power
                         if (batteryPowerLeft_ < generatorActivateAtPowerLevel_ ||
                             batteryPowerInUsage_ > generatorActivateAtUsageLevel_)
                         {
-                            IMyPowerProducer maxOutputGenerator = null;
-
                             if (canBeActivated(generator))
                             {
                                 generatorRunning_++;
-                                activateBlock(maxOutputGenerator);
-                                return true;
+                                activateBlock(generator);
+                                return;
                             }
                         }
                     }
@@ -1742,7 +2081,7 @@ namespace IngameScript
                 generatorCurrentOutput_ = currentOut;
                 generatorMaxOutput_ = maxOut;
                 generatorRunning_ = running;
-                return false;
+                return;
             }
 
             #endregion
@@ -1785,19 +2124,17 @@ namespace IngameScript
                     if (dc_.State != ModuleState.Running)
                         return;
 
-                    if (!hasOneBatteryManaged())
-                        hasOneGeneratorManaged();
+                    processBatteries();
+                    processGenerators();
 
-                    Echo("EM:GeneratorsRunning=" + generatorRunning_);
-                    Echo("EM:BatteryPowerLeft=" + batteryPowerLeft_.ToString("##0.000"));
-                    Echo("EM:BatteryPowerInUsage=" + batteryPowerInUsage_.ToString("##0.000"));
-                    Echo("EM:BatteryCurrentStored=" + batteryCurrentStored_.ToString("##0.000"));
-                    Echo("EM:BatteryCurrentOutput=" + batteryCurrentOutput_.ToString("##0.000"));
-                    Echo("EM:BatteryMaxOutput=" + batteryMaxOutput_.ToString("##0.000"));
-                    Echo("EM:BatteryMaxStored=" + batteryMaxStored_.ToString("##0.000"));
-                    Echo("EM:BatteryAmountInRechargeMode=" + batteryAmountInRechargeMode_);
-                    Echo("EM:BatteryAmountOfActive=" + batteryAmountOfActive_);
-                    Echo("EM:HomeBase=" + (dc_.IsHomeBase ? "true" : "false"));
+                    //Echo("EM:GeneratorsRunning=" + generatorRunning_);
+                    //Echo("EM:BatteryPowerLeft=" + batteryPowerLeft_.ToString("##0.000"));
+                    //Echo("EM:BatteryPowerInUsage=" + batteryPowerInUsage_.ToString("##0.000"));
+                    //Echo("EM:BatteryCurrentStored=" + batteryCurrentStored_.ToString("##0.000"));
+                    //Echo("EM:BatteryCurrentOutput=" + batteryCurrentOutput_.ToString("##0.000"));
+                    //Echo("EM:BatteryMaxOutput=" + batteryMaxOutput_.ToString("##0.000"));
+                    //Echo("EM:BatteryMaxStored=" + batteryMaxStored_.ToString("##0.000"));
+                    //Echo("EM:HomeBase=" + (dc_.IsHomeBase ? "true" : "false"));
                 }
                 else if (State == ModuleState.Bootup)
                 {
@@ -1806,7 +2143,6 @@ namespace IngameScript
 
                     if (dc_ != null && dc_.State == ModuleState.Running)
                     {
-                        calculateBatteryStateCounts();
                         calculateGeneratorStats();
                         setState(ModuleState.Running);
                     }
@@ -2033,10 +2369,19 @@ namespace IngameScript
         }
         #endregion // Module implementations
 
+
         #region Implement SE Method
+        private int failureCounter_ = 0;
+        private Exception lastException_ = null;
+        private DateTime lastExceptionTime_ = DateTime.Now;
+
+
         public Program()
         {
             Runtime.UpdateFrequency = updateFrequency_;
+
+            // configuration
+            config_ = new Configuration(this);
 
             // setup defaults
             moduleStateColor_ = new Dictionary<Module.ModuleState, Color>();
@@ -2056,7 +2401,7 @@ namespace IngameScript
             modules_.Add(new InventoryManager(this));
 
             // set the hole system as invalid
-            isInvalid = true;
+            stateHandler_ = handleInvalidateState;
         }
 
 
@@ -2064,39 +2409,52 @@ namespace IngameScript
         {
             foreach (var module in modules_)
                 module.onSaveConfiguration();
+
+            config_.writeConfiguration();
         }
 
 
         public void Main(string argument, UpdateType updateSource)
         {
             // some outputs
-            Echo("Rover Control System (RCS)");
-            Echo("=============================");
-            Echo("Version:      " + rcsVersion_);
-            Echo("State:          " + (isInvalid ? "Invalid" : "Valid"));
-            Echo("Fast Mode: " + (useFastMode_ ? "Enabled" : "Disabled"));
-            Echo("Run Time:   " + Runtime.LastRunTimeMs.ToString("0.0000" + "ms"));
-            Echo("Failures:     " + failureCounter_ + "\n");
+            string message = string.Empty;
+
+            message += "Rover Control System (RCS)";
+            message += "\n=============================";
+            message += "\nVersion:      " + rcsVersion_;
+            message += "\nFast Mode: " + (useFastMode_ ? "Enabled" : "Disabled");
+            message += "\nRun Time:   " + Runtime.LastRunTimeMs.ToString("0.0000" + "ms");
+            message += "\nFailures:     " + failureCounter_ + "\n";
+
+            Echo(message);
 
             // process command line
 
             // process rcs system state
             try
             {
-                if (isInvalid)
-                    handleInvalidateState();
-                else
-                    handleRunningState(updateSource);
+                if (stateHandler_ != null)
+                    stateHandler_(updateSource);
             }
             catch (Exception exp)
             {
                 lastException_ = exp;
                 failureCounter_++;
-                isInvalid = true;
-            }
 
-            if (lastException_ != null)
-                Echo(lastException_.ToString());
+                // switch to panic state if we have more then 10 exceptions in 10sec
+                if ((DateTime.Now - lastExceptionTime_) <= TimeSpan.FromSeconds(10.0))
+                {
+                    if (failureCounter_ >= 10)
+                    {
+                        stateHandler_ = handlePanicState;
+                        return;
+                    }
+                }
+                else
+                    failureCounter_ = 0;
+
+                stateHandler_ = handleInvalidateState;
+            }
         }
         #endregion
         // script end
