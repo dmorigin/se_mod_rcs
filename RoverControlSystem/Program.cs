@@ -23,32 +23,17 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
         // Default values - Names
-        static readonly UpdateFrequency updateFrequency_ = UpdateFrequency.Update10;
-        static readonly string defaultLCDNameTag_ = "[RCS]";
-        static readonly string defaultBreakLightsGroupName_ = "Lights Break"; // group name
-        static readonly string defaultConnectorLightsGroupName_ = "Lights Connector"; // group name
+        static readonly UpdateFrequency defaultUpdateFrequency_ = UpdateFrequency.Update10;
+        static readonly UpdateType defaultUpdateType_ = UpdateType.Update10;
+        static readonly string defaultBreakLightsGroupName_ = "[COH-101] Lights Break"; // group name
+        static readonly string defaultConnectorLightsGroupName_ = "[COH-101] Lights Connector"; // group name
 
         // Default values - States
         static readonly bool defaultUseFastMode_ = false;
         //static readonly bool defaultUseAutoFastMode_ = true;
-        static readonly string defaultUITextFont_ = "Monospace";
-        static readonly float defaultUIPadding_ = 10f;
-        static readonly TimeSpan defaultLCDUpdateInterval_ = new TimeSpan(600000); // 60sec
-
-        // Default values - Colors
-        static readonly Color defaultSurfaceBackgroundColor_ = new Color(0, 38, 121);
-        static readonly Color defaultLogoBackgroundColor_ = Color.AntiqueWhite;
-        static readonly Color defaultLogoForgroundColor_ = Color.Azure;
-        static readonly Color defaultStateColorInvalid_ = Color.Red;
-        static readonly Color defaultStateColorBootup_ = Color.DarkBlue;
-        static readonly Color defaultStateColorStopped_ = Color.OrangeRed;
-        static readonly Color defaultStateColorResume_ = Color.Orange;
-        static readonly Color defaultStateColorRunning_ = Color.Green;
-        static readonly Color defaultStateColorFailure_ = Color.Black;
-        static readonly Color defaultUITextColor_ = Color.Azure;
 
 
-        const string rcsVersion_ = "0.45 Alpha";
+        const string rcsVersion_ = "0.50 Alpha";
 
 
         #region Visualization
@@ -56,11 +41,48 @@ namespace IngameScript
         Dictionary<Module.ModuleState, Color> moduleStateColor_;
 
 
+        private void UpdateLCDPanels()
+        {
+            foreach (var surface in surfaces_)
+            {
+                if (surface.processUpdate())
+                    return;
+            }
+        }
+
+
+        private void ShutdownLCDPanels()
+        {
+            foreach (var surface in surfaces_)
+                surface.shutdown();
+        }
+
+
         class Surface
         {
+            // default values
+            public static readonly string defaultUITextFont_ = "Monospace";
+            public static readonly float defaultUIPadding_ = 10f;
+            public static readonly TimeSpan defaultLCDUpdateInterval_ = new TimeSpan(0, 0, 1); // 1sec
+
+            // Default values - Colors
+            public static readonly Color defaultSurfaceBackgroundColor_ = new Color(0, 38, 121);
+            public static readonly Color defaultUITextColor_ = Color.Azure;
+            public static readonly Color defaultLogoBackgroundColor_ = Color.AntiqueWhite;
+            public static readonly Color defaultLogoForgroundColor_ = Color.Azure;
+
+            public static readonly Color defaultStateColorInvalid_ = Color.Red;
+            public static readonly Color defaultStateColorBootup_ = Color.DarkBlue;
+            public static readonly Color defaultStateColorStopped_ = Color.OrangeRed;
+            public static readonly Color defaultStateColorResume_ = Color.Orange;
+            public static readonly Color defaultStateColorRunning_ = Color.Green;
+            public static readonly Color defaultStateColorFailure_ = Color.Black;
+
+            // basic values
             Program app_ = null;
             IMyTextSurface surface_ = null;
             int index_ = 0;
+            string configSection_ = string.Empty;
             DateTime lastUpdate_ = DateTime.Now;
 
             // configurations
@@ -72,12 +94,40 @@ namespace IngameScript
             Vector2 UIFontSize_ = new Vector2();
             float UIPadding_ = defaultUIPadding_;
 
+            // bar colors
+            Segment[] barColorsTopBetter_ = { new Segment(0.15f, Color.Red), new Segment(0.4f, Color.Yellow), new Segment(1.0f, Color.Green) };
+            Segment[] barColorsBtmBetter_ = { new Segment(0.6f, Color.Green), new Segment(0.85f, Color.Yellow), new Segment(1.0f, Color.Red) };
+            Color barBackgroundColor_ = defaultSurfaceBackgroundColor_;
 
-            public Surface(Program app, IMyTextSurface surface, int index = 0)
+
+            public Surface(Program app, IMyTextSurface surface, int index, string configSection)
             {
                 app_ = app;
                 surface_ = surface;
                 index_ = index;
+                configSection_ = configSection;
+
+                loadConfiguration();
+            }
+
+
+            public void loadConfiguration()
+            {
+                app_.Config.getValue(configSection_, "Font", out UITextFont_, defaultUITextFont_);
+                app_.Config.getValue(configSection_, "FontColor", out UITextColor_, defaultUITextColor_);
+                app_.Config.getValue(configSection_, "UIPadding", out UIPadding_, defaultUIPadding_);
+                app_.Config.getValue(configSection_, "BackgroundColor", out surfaceBackgroundColor_, defaultSurfaceBackgroundColor_);
+                app_.Config.getValue(configSection_, "BackgroundBarColor", out barBackgroundColor_, defaultSurfaceBackgroundColor_);
+            }
+
+
+            public void saveConfiguration()
+            {
+                app_.Config.setValue(configSection_, "Font", UITextFont_);
+                app_.Config.setValue(configSection_, "FontColor", UITextColor_);
+                app_.Config.setValue(configSection_, "UIPadding", UIPadding_);
+                app_.Config.setValue(configSection_, "BackgroundColor", surfaceBackgroundColor_);
+                app_.Config.setValue(configSection_, "BackgroundBarColor", barBackgroundColor_);
             }
 
 
@@ -91,7 +141,7 @@ namespace IngameScript
             {
                 // time to update?
                 DateTime curTime = DateTime.Now;
-                if ((lastUpdate_ - curTime) < defaultLCDUpdateInterval_)
+                if ((curTime - lastUpdate_) < defaultLCDUpdateInterval_)
                     return false;
 
                 lastUpdate_ = curTime;
@@ -186,14 +236,14 @@ namespace IngameScript
                 float barPosY = position.Y + 10f + (barSize.Y * 0.5f);
 
                 // battery bars
-                DrawProgressBarV(frame, em.EnergieInUsage, new Vector2(position.X + barSize.X * 2.5f + UIPadding3, barPosY),
-                    barSize, Color.Lerp(Color.Green, Color.Red, em.EnergieInUsage), surfaceBackgroundColor_, 2f, Color.Azure);
-                DrawProgressBarV(frame, em.BatteryPowerLeft, new Vector2(position.X + barSize.X * 1.5f + (UIPadding_ * 2f), barPosY),
-                    barSize, Color.Lerp(Color.Red, Color.Green, em.BatteryPowerLeft), surfaceBackgroundColor_, 2f, Color.Azure);
+                DrawProgressBar(frame, em.EnergieInUsage, new Vector2(position.X + barSize.X * 2.5f + UIPadding3, barPosY),
+                    barSize, barColorsBtmBetter_, barBackgroundColor_, true);
+                DrawProgressBar(frame, em.BatteryPowerLeft, new Vector2(position.X + barSize.X * 1.5f + (UIPadding_ * 2f), barPosY),
+                    barSize, barColorsTopBetter_, barBackgroundColor_, true);
 
                 // Power generator bars
-                DrawProgressBarV(frame, (float)im.HydrogenFillRatio, new Vector2(position.X + barSize.X * 0.5f + UIPadding_, barPosY),
-                    barSize, Color.Lerp(Color.LightBlue, Color.Red, (float)im.HydrogenFillRatio), surfaceBackgroundColor_, 2f, Color.Azure);
+                DrawProgressBar(frame, (float)im.HydrogenFillRatio, new Vector2(position.X + barSize.X * 0.5f + UIPadding_, barPosY),
+                    barSize, barColorsTopBetter_, barBackgroundColor_, true);
 
                 // draw icons
                 float iconPosY = position.Y + (iconSize.Y * 0.5f) + (UIPadding_ * 2f) + barSize.Y;
@@ -299,111 +349,119 @@ namespace IngameScript
 
 
             #region Bar Tools
-            private void DrawProgressBarH(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-                Color barColor, Color backgroundColor)
+            private struct Segment
             {
-                DrawProgressBarH(frame, fillRatio, position, size, barColor, backgroundColor, 0f, new Color(0f));
-            }
-
-
-            private void DrawProgressBarH(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-                Color barColor, Color backgroundColor, float borderSize, Color borderColor)
-            {
-                // draw border
-                if (borderSize > 0f)
+                public Segment(float value, Color color)
                 {
-                    MySprite border = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, borderColor);
-                    frame.Add(border);
+                    value_ = value;
+                    color_ = color;
                 }
 
+                public float value_; // this is the max value. The start value depends on the previews segment.
+                public Color color_;
+            }
+
+
+            private void DrawProgressBar(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
+                Segment[] segments, Color backgroundColor, bool vertical = false)
+            {
                 // draw background
-                float positionBorderX = position.X - (borderSize * 0.5f);
-                float positionBorderY = position.Y;
-
-                MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionBorderX, positionBorderY),
-                    size - (borderSize * 2f), backgroundColor);
-                frame.Add(background);
-
-                // draw bar
-                float sizeX = (size.X - (borderSize * 2f)) * fillRatio;
-                float sizeY = size.Y - (borderSize * 2f);
-
-                float positionX = position.X - ((size.X - sizeX) * 0.5f) + borderSize;
-                float positionY = position.Y;
-
-                MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionX, positionY), new Vector2(sizeX, sizeY), barColor);
-                frame.Add(bar);
-            }
-
-
-            private void DrawProgressBarV(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-                Color barColor, Color backgroundColor)
-            {
-                DrawProgressBarV(frame, fillRatio, position, size, barColor, backgroundColor, 0f, new Color(0f));
-            }
-
-
-            private void DrawProgressBarV(MySpriteDrawFrame frame, float fillRatio, Vector2 position, Vector2 size,
-                Color barColor, Color backgroundColor, float borderSize, Color borderColor)
-            {
-                // draw border
-                if (borderSize > 0f)
+                if (backgroundColor.A > 0)
                 {
-                    MySprite border = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, borderColor);
-                    frame.Add(border);
+                    MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", position, size, backgroundColor);
+                    frame.Add(background);
                 }
 
-                // draw background
-                float positionBorderX = position.X;
-                float positionBorderY = position.Y + (borderSize * 0.5f);
-
-                MySprite background = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionBorderX, positionBorderY),
-                    size - (borderSize * 2f), backgroundColor);
-                frame.Add(background);
-
                 // draw bar
-                float sizeX = size.X - (borderSize * 2f);
-                float sizeY = (size.Y - (borderSize * 2f)) * fillRatio;
+                float startRatio = 0f;
 
-                float positionX = position.X;
-                float positionY = position.Y + ((size.Y - sizeY) * 0.5f) - borderSize;
+                for (int s = 0; s < segments.Length && startRatio <= fillRatio; ++s)
+                {
+                    float ratio = Math.Min(segments[s].value_, fillRatio) - startRatio;
+                    Vector2 barSize;
+                    Vector2 barPosition;
 
-                MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", new Vector2(positionX, positionY), new Vector2(sizeX, sizeY), barColor);
-                frame.Add(bar);
+                    if (vertical)
+                    {
+                        barSize = new Vector2(size.X, size.Y * ratio);
+                        barPosition = new Vector2(position.X, position.Y + ((size.Y - barSize.Y) * 0.5f) - (size.Y * startRatio));
+                    }
+                    else
+                    {
+                        barSize = new Vector2(size.X * ratio, size.Y);
+                        barPosition = new Vector2(position.X - ((size.X - barSize.X) * 0.5f) + (size.X * startRatio), position.Y);
+                    }
+
+
+                    MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", barPosition, barSize, segments[s].color_);
+                    frame.Add(bar);
+
+                    startRatio += ratio;
+                }
             }
             #endregion // Bar Tools
-        }
-
-
-        private void UpdateLCDPanels()
-        {
-            foreach (var surface in surfaces_)
-            {
-                if (surface.processUpdate())
-                    return;
-            }
-        }
-
-
-        private void ShutdownLCDPanels()
-        {
-            foreach(var surface in surfaces_)
-                surface.shutdown();
         }
         #endregion // Visualization
 
 
         #region Commandline
-        public bool parseCommandLine(string args)
+        public bool processCommandLine(string args)
         {
-            //MyCommandLine parser;
+            MyCommandLine parser = new MyCommandLine();
+            if (parser.TryParse(args))
+            {
+                if (parser.Switch("reboot"))
+                {
+                    stateHandler_ = handleInvalidateState;
+                }
+
+                return true;
+            }
             return false;
         }
         #endregion
 
 
         #region Configuration
-        class Configuration
+        private Configuration config_ = null;
+        public Configuration Config
+        {
+            get
+            {
+                return config_;
+            }
+        }
+
+
+        private bool loadConfiguration()
+        {
+            config_.invalidate();
+            if (!config_.read())
+                return false;
+
+            // read system configuration
+            config_.getValue("System", "FastMode", out useFastMode_, defaultUseFastMode_);
+
+            return true;
+        }
+
+
+        private void saveConfiguration()
+        {
+            foreach (var module in modules_)
+                module.onSaveConfiguration();
+
+            foreach (var surface in surfaces_)
+                surface.saveConfiguration();
+
+            // save system settings
+            config_.setValue("System", "FastMode", useFastMode_);
+
+            config_.write();
+        }
+
+
+        public class Configuration
         {
             Program app_ = null;
             MyIni config_ = new MyIni();
@@ -418,7 +476,7 @@ namespace IngameScript
             }
 
 
-            public bool readConfiguration()
+            public bool read()
             {
                 if (!config_.TryParse(app_.Me.CustomData))
                     return false;
@@ -440,7 +498,7 @@ namespace IngameScript
             }
 
 
-            public void writeConfiguration()
+            public void write()
             {
                 app_.Me.CustomData = config_.ToString();
             }
@@ -628,7 +686,7 @@ namespace IngameScript
 
             public void setValue(string section, string key, Color value, string comment = "")
             {
-                config_.Set(section, key, string.Format("{0},{1},{2},{3}", value.B, value.G, value.B, value.A));
+                config_.Set(section, key, string.Format("{0},{1},{2},{3}", value.R, value.G, value.B, value.A));
                 config_.SetComment(section, key, comment);
             }
             #endregion
@@ -737,7 +795,6 @@ namespace IngameScript
         #region RCS System State
         int nextModulePosition_ = 0;
         bool useFastMode_ = defaultUseFastMode_;
-        Configuration config_ = null;
         Action<UpdateType> stateHandler_ = null;
 
 
@@ -750,13 +807,15 @@ namespace IngameScript
             }
 
             // regenerate configuration
-            config_.invalidate();
-            if (!config_.readConfiguration())
+            if (!loadConfiguration())
             {
                 // kernel panic ^^
                 stateHandler_ = handlePanicState;
                 return;
             }
+
+            // clear all surface
+            surfaces_.Clear();
 
             // scan all blocks
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, (block) =>
@@ -766,14 +825,25 @@ namespace IngameScript
                     return false;
 
                 // search for LCD Panels
-                // ToDo: Search for Panels inside cockpits and PB's
                 IMyTextSurface surface = block as IMyTextSurface;
-                if (surface != null && block.CustomName.Contains(defaultLCDNameTag_))
+                if (surface != null && config_.sectionExists($"LCD:({block.CustomName}):0"))
                 {
-                    surfaces_.Add(new Surface(this, surface));
+                    surfaces_.Add(new Surface(this, surface, 0, $"LCD:({block.CustomName}):0"));
                     return false;
                 }
 
+                // Search for display inside a cockpit that is used
+                IMyCockpit cockpit = block as IMyCockpit;
+                if (cockpit != null)
+                {
+                    for (int i = 0; i < cockpit.SurfaceCount; ++i)
+                    {
+                        if (config_.sectionExists($"LCD:({block.CustomName}):{i}"))
+                            surfaces_.Add(new Surface(this, cockpit.GetSurface(i), i, $"LCD:({block.CustomName}):{i}"));
+                    }
+                }
+
+                // process modules
                 foreach (var module in modules_)
                 {
                     if (module.onScanBlock(block))
@@ -1078,8 +1148,8 @@ namespace IngameScript
             double velocityLastVector_ = 0.0;
 
 
-            public MainRCSSystem(Program parent)
-                : base(parent, "Main RCS System", "RCS")
+            public MainRCSSystem(Program app)
+                : base(app, "Main RCS System", "RCS")
             {
                 cockpits_ = new List<IMyShipController>();
                 gyros_ = new List<IMyGyro>();
@@ -1317,8 +1387,8 @@ namespace IngameScript
          */
         public class NetworkController : Module
         {
-            public NetworkController(Program parent)
-                : base(parent, "Network Controller", "NC")
+            public NetworkController(Program app)
+                : base(app, "Network Controller", "NC")
             {
             }
 
@@ -1345,8 +1415,8 @@ namespace IngameScript
             bool isHomeBase_ = false;
 
 
-            public DockingController(Program parent)
-                : base(parent, "Docking Controller", "DC")
+            public DockingController(Program app)
+                : base(app, "Docking Controller", "DC")
             {
                 connectors_ = new List<IMyShipConnector>();
                 lights_ = new List<IMyLightingBlock>();
@@ -1417,6 +1487,16 @@ namespace IngameScript
                 setState(ModuleState.Invalidate);
                 connectors_.Clear();
                 lights_.Clear();
+            }
+
+
+            public override void onValidate()
+            {
+                // read configuration
+                App.Config.getValue($"Module:{Name}", "ColorReady", out lightColorReady_, Color.Yellow);
+                App.Config.getValue($"Module:{Name}", "ColorConnected", out lightColorConnected_, Color.Green);
+
+                base.onValidate();
             }
 
 
@@ -1495,6 +1575,13 @@ namespace IngameScript
                         setState(ModuleState.Running);
                 }
             }
+
+
+            public override void onSaveConfiguration()
+            {
+                App.Config.setValue($"Module:{Name}", "ColorReady", lightColorReady_);
+                App.Config.setValue($"Module:{Name}", "ColorConnected", lightColorConnected_);
+            }
             #endregion
         }
 
@@ -1535,8 +1622,8 @@ namespace IngameScript
             float powerIncrease_ = 5.0f;
 
 
-            public SuspensionsManager(Program parent)
-                : base(parent, "Suspensions Manager", "SM")
+            public SuspensionsManager(Program app)
+                : base(app, "Suspensions Manager", "SM")
             {
                 motors_ = new List<IMyMotorSuspension>();
                 breakLights_ = new List<IMyLightingBlock>();
@@ -1805,8 +1892,8 @@ namespace IngameScript
             DockingController dc_ = null;
 
 
-            public EnergieManager(Program parent)
-                : base(parent, "Energie Manager", "EM")
+            public EnergieManager(Program app)
+                : base(app, "Energie Manager", "EM")
             {
                 batteries_ = new List<IMyBatteryBlock>();
                 generators_ = new List<IMyPowerProducer>();
@@ -2148,6 +2235,14 @@ namespace IngameScript
                     }
                 }
             }
+
+
+            public override void onSaveConfiguration()
+            {
+
+
+                base.onSaveConfiguration();
+            }
             #endregion
         }
 
@@ -2174,8 +2269,8 @@ namespace IngameScript
 
 
 
-            public InventoryManager(Program parent)
-                : base(parent, "Inventory Manager", "IM")
+            public InventoryManager(Program app)
+                : base(app, "Inventory Manager", "IM")
             {
                 inventoryBlocks_ = new List<IMyTerminalBlock>();
                 oxygenTanks_ = new List<IMyGasTank>();
@@ -2378,19 +2473,19 @@ namespace IngameScript
 
         public Program()
         {
-            Runtime.UpdateFrequency = updateFrequency_;
+            Runtime.UpdateFrequency = defaultUpdateFrequency_;
 
             // configuration
             config_ = new Configuration(this);
 
             // setup defaults
             moduleStateColor_ = new Dictionary<Module.ModuleState, Color>();
-            moduleStateColor_.Add(Module.ModuleState.Bootup, defaultStateColorBootup_);
-            moduleStateColor_.Add(Module.ModuleState.Running, defaultStateColorRunning_);
-            moduleStateColor_.Add(Module.ModuleState.Invalidate, defaultStateColorInvalid_);
-            moduleStateColor_.Add(Module.ModuleState.Resume, defaultStateColorResume_);
-            moduleStateColor_.Add(Module.ModuleState.Stopped, defaultStateColorStopped_);
-            moduleStateColor_.Add(Module.ModuleState.Failure, defaultStateColorFailure_);
+            moduleStateColor_.Add(Module.ModuleState.Bootup, Surface.defaultStateColorBootup_);
+            moduleStateColor_.Add(Module.ModuleState.Running, Surface.defaultStateColorRunning_);
+            moduleStateColor_.Add(Module.ModuleState.Invalidate, Surface.defaultStateColorInvalid_);
+            moduleStateColor_.Add(Module.ModuleState.Resume, Surface.defaultStateColorResume_);
+            moduleStateColor_.Add(Module.ModuleState.Stopped, Surface.defaultStateColorStopped_);
+            moduleStateColor_.Add(Module.ModuleState.Failure, Surface.defaultStateColorFailure_);
 
             // ToDo: setup your modules here
             modules_ = new List<Module>();
@@ -2407,10 +2502,7 @@ namespace IngameScript
 
         public void Save()
         {
-            foreach (var module in modules_)
-                module.onSaveConfiguration();
-
-            config_.writeConfiguration();
+            saveConfiguration();
         }
 
 
@@ -2423,37 +2515,43 @@ namespace IngameScript
             message += "\n=============================";
             message += "\nVersion:      " + rcsVersion_;
             message += "\nFast Mode: " + (useFastMode_ ? "Enabled" : "Disabled");
+            message += "\nLCD's          " + surfaces_.Count;
             message += "\nRun Time:   " + Runtime.LastRunTimeMs.ToString("0.0000" + "ms");
             message += "\nFailures:     " + failureCounter_ + "\n";
 
             Echo(message);
 
             // process command line
+            if ((updateSource & UpdateType.Terminal) != 0 || (updateSource & UpdateType.Trigger) != 0)
+                processCommandLine(argument);
 
             // process rcs system state
-            try
+            if ((updateSource & defaultUpdateType_) != 0)
             {
-                if (stateHandler_ != null)
-                    stateHandler_(updateSource);
-            }
-            catch (Exception exp)
-            {
-                lastException_ = exp;
-                failureCounter_++;
-
-                // switch to panic state if we have more then 10 exceptions in 10sec
-                if ((DateTime.Now - lastExceptionTime_) <= TimeSpan.FromSeconds(10.0))
+                try
                 {
-                    if (failureCounter_ >= 10)
-                    {
-                        stateHandler_ = handlePanicState;
-                        return;
-                    }
+                    if (stateHandler_ != null)
+                        stateHandler_(updateSource);
                 }
-                else
-                    failureCounter_ = 0;
+                catch (Exception exp)
+                {
+                    lastException_ = exp;
+                    failureCounter_++;
 
-                stateHandler_ = handleInvalidateState;
+                    // switch to panic state if we have more then 10 exceptions in 10sec
+                    if ((DateTime.Now - lastExceptionTime_) <= TimeSpan.FromSeconds(10.0))
+                    {
+                        if (failureCounter_ >= 10)
+                        {
+                            stateHandler_ = handlePanicState;
+                            return;
+                        }
+                    }
+                    else
+                        failureCounter_ = 0;
+
+                    stateHandler_ = handleInvalidateState;
+                }
             }
         }
         #endregion
